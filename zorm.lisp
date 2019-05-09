@@ -18,7 +18,8 @@
            #:delete-dao
            #:dao-table-name
            #:with-column-writers
-           #:db-null-p))
+           #:db-null-p
+           #:dao-dirty-slot-names))
 
 (in-package #:zorm)
 
@@ -122,7 +123,7 @@ find-primary-key-info function."))
 
 (defclass dao ()
   ((db-null-slot-names :initform nil)
-   (dirty-slots :initform nil :accessor dao-dirty-slots))
+   (dirty-slot-names :initform nil :accessor dao-dirty-slot-names))
   (:metaclass dao-class))
 
 (defmethod primary-key ((dao dao))
@@ -196,7 +197,7 @@ find-primary-key-info function."))
 
 (defmethod (setf slot-value-using-class) :after (new-value (class dao-class) dao (slot effective-dao-slot))
   (when (slot-column-p slot)
-    (pushnew (slot-definition-name slot) (dao-dirty-slots dao))
+    (pushnew (slot-definition-name slot) (dao-dirty-slot-names dao))
     (with-slots (db-null-slot-names)
         dao
       (let ((slot-name (slot-definition-name slot)))
@@ -263,9 +264,9 @@ find-primary-key-info function."))
 (defun dao-from-fields (class query-fields result-next-field-generator-fn)
   (let ((instance (allocate-instance class)))
     (setf (slot-value instance 'db-null-slot-names) nil)
-    (setf (slot-value instance 'dirty-slots) nil)
+    (setf (slot-value instance 'dirty-slot-names) nil)
     (update-dao-from-fields instance query-fields result-next-field-generator-fn)
-    (setf (slot-value instance 'dirty-slots) nil)
+    (setf (slot-value instance 'dirty-slot-names) nil)
     (initialize-instance instance)
     instance))
 
@@ -426,7 +427,7 @@ violation, update it instead."
                       (when unbound
                         (format out " RETURNING ~{~A~^, ~}" (mapcar #'column-sql-name unbound))))))
         (exec-query *database* query (dao-update-reader dao))
-        (setf (slot-value dao 'dirty-slots) nil))))
+        (setf (slot-value dao 'dirty-slot-names) nil))))
   dao)
 
 (defgeneric update-dao (dao)
@@ -436,7 +437,7 @@ violation, update it instead."
 (defmethod update-dao ((dao dao))
   (let* ((class (class-of dao))
          (column-slot-names (remove-if-not (lambda (slot-name)
-                                             (member slot-name (dao-dirty-slots dao)))
+                                             (member slot-name (dao-dirty-slot-names dao)))
                                            (dao-column-slot-names class))))
     (when column-slot-names
       (let* ((values (mapcan (lambda (slot-name)
@@ -450,13 +451,13 @@ violation, update it instead."
                             values
                             (dao-test-sql-string dao))))
         (exec-query *database* query)
-        (setf (dao-dirty-slots dao) nil)))))
+        (setf (dao-dirty-slot-names dao) nil)))))
 
 (defgeneric refresh-dao (dao &key discard-dirty columns))
 
 (defmethod refresh-dao ((dao dao) &key discard-dirty (columns :bound))
-  (when (and (dao-dirty-slots dao) (not discard-dirty))
-    (error "Cannot refresh dao when it has dirty slots: ~S" (dao-dirty-slots dao)))
+  (when (and (dao-dirty-slot-names dao) (not discard-dirty))
+    (error "Cannot refresh dao when it has dirty slots: ~S" (dao-dirty-slot-names dao)))
   (let* ((class (class-of dao))
          (refresh-columns (if (eql columns :bound)
                               (remove-if-not (lambda (slot-name)
@@ -470,7 +471,7 @@ violation, update it instead."
               (slot-makunbound dao slot-name))
             (dao-column-slot-names class))
     (exec-query *database* query (dao-update-reader dao))
-    (setf (dao-dirty-slots dao) nil)
+    (setf (dao-dirty-slot-names dao) nil)
     dao))
 
 (defgeneric delete-dao (dao)
