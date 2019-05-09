@@ -320,7 +320,7 @@ violation, update it instead."
       (write-string "SELECT" out)
       (format out " ~{~A~^, ~}"
               (mapcar (lambda (column-name)
-                        (s-sql:to-sql-name column-name))
+                        (s-sql:to-sql-name (dao-column-sql-name class column-name)))
                       (union (or (when (listp columns)
                                    columns)
                                  (mapcar #'slot-definition-name
