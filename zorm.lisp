@@ -159,28 +159,29 @@ find-primary-key-info function."))
 
 (defvar *class-finalize-lock* (bt:make-lock))
 
-(defmethod finalize-inheritance :around ((class dao-class))
-  #+zorm-thread-safe
+(defmethod finalize-inheritance ((class dao-class))
+  #+thread-support
   (let ((previously-finalized-p (class-finalized-p class)))
-    (bordeaux-threads:with-lock-held (*class-finalize-lock*)
-      (unless (and (class-finalized-p class)
-                   (not previously-finalized-p))
+    ;; previously-finalized-p helps us distinguish between the case where we are
+    ;; trying to re-finalize the class v/s race conditions
+    (bt:with-lock-held (*class-finalize-lock*)
+      (when (or (not (class-finalized-p class)) previously-finalized-p)
         (call-next-method))))
-  #-zorm-thread-safe
-  (call-next-method))
+  #-thread-support
+  (call-next-method)
 
-(defmethod finalize-inheritance :after ((class dao-class))
-  "Building a row reader and a set of methods can only be done after
-  inheritance has been finalised."
-  ;; The effective set of keys of a class is the union of its keys and
-  ;; the keys of all its superclasses.
+  ;; set the primary key
   (setf (slot-value class 'effective-primary-key)
         (or (direct-primary-key class)
             (some #'primary-key (rest (dao-superclasses class)))))
   (unless (every (lambda (x) (member x (dao-column-slot-names class))) (primary-key class))
     (error "Class ~A has a key that is not also a slot." (class-name class)))
+
+  ;; set up column name->slot mapping
   (setf (slot-value class 'column-map)
-        (mapcar (lambda (s) (cons (slot-sql-name s) (slot-definition-name s))) (dao-column-slots class))))
+        (mapcar (lambda (s)
+                  (cons (slot-sql-name s) (slot-definition-name s)))
+                (dao-column-slots class))))
 
 (defun dao-column-slots (class)
   "Enumerate the slots in a class that refer to table rows."

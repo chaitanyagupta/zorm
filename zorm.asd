@@ -4,7 +4,7 @@
   :author "Chaitanya Gupta <mail@chaitanyagupta.com>"
   :license "BSD-3-Clause"
   :serial t
-  :depends-on ("postmodern" "closer-mop")
+  :depends-on ("postmodern" "closer-mop" "bordeaux-threads")
   :components ((:file "zorm")))
 
 (asdf:defsystem "zorm/test"
