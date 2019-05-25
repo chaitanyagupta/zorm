@@ -78,11 +78,11 @@
 
 (defclass dao-reference-definition ()
   ((class :initarg :class :reader dao-reference-definition-class)
-   (key :initarg :key :reader dao-reference-definition-key)))
+   (key :initarg :key :initform nil :reader dao-reference-definition-key)))
 
 (defclass dao-reverse-reference-definition ()
   ((class :initarg :class :reader dao-reverse-reference-definition-class)
-   (key :initarg :key :reader dao-reverse-reference-definition-key)
+   (key :initarg :key :initform nil :reader dao-reverse-reference-definition-key)
    (many :initarg :many :reader dao-reverse-reference-definition-many)))
 
 (defclass dao-slot-mixin ()
@@ -97,7 +97,7 @@
 (defmethod shared-initialize :after ((slot dao-direct-slot-definition) slot-names
                                      &key
                                        column (selectp t) (col-name nil col-name-p)
-                                       references key reverse-key (many t)
+                                       references key reverse reverse-key (many t)
                                        &allow-other-keys)
   (declare (ignore slot-names))
   (when (and column references)
@@ -111,22 +111,20 @@
                                             :selectp selectp)))
       (setf (slot-value slot 'column) column-definition)))
   (when references
-    (when (and key reverse-key)
-      (error "Both KEY and REVERSE-KEY can't be given for a references slot"))
+    (when (and key (or reverse reverse-key))
+      (error "KEY and (REVERSE or REVERSE-KEY) can't be given for a references slot"))
     (cond
-      (key
-       (let ((reference-definition (make-instance 'dao-reference-definition
-                                                  :class references
-                                                  :key (ensure-list key))))
-         (setf (slot-value slot 'reference) reference-definition)))
-      (reverse-key
+      ((or reverse reverse-key)
        (let ((reverse-reference-definition (make-instance 'dao-reverse-reference-definition
                                                           :class references
                                                           :key (ensure-list reverse-key)
                                                           :many many)))
          (setf (slot-value slot 'reverse-reference) reverse-reference-definition)))
       (t
-       (error "At least one of KEY or REVERSE-KEY must be given")))))
+       (let ((reference-definition (make-instance 'dao-reference-definition
+                                                  :class references
+                                                  :key (ensure-list key))))
+         (setf (slot-value slot 'reference) reference-definition))))))
 
 (defmethod direct-slot-definition-class ((class dao-class) &key &allow-other-keys)
   "Slots that have a :column option are column-slots."
@@ -315,19 +313,21 @@ find-primary-key-info function."))
                  nil)
                (setf (slot-value dao slot-name) value))))
         ((dao-slot-definition-reference slot)
-         (with-slots (class key)
+         (with-slots ((referenced-class class) key)
              (dao-slot-definition-reference slot)
-           (let ((fk-values (mapcar (lambda (slot-name)
-                                      (slot-value dao slot-name))
-                                    key)))
-             (setf (slot-value dao slot-name) (get-dao class fk-values)))))
+           (let* ((key (or key (primary-key referenced-class)))
+                  (fk-values (mapcar (lambda (slot-name)
+                                       (slot-value dao slot-name))
+                                     key)))
+             (setf (slot-value dao slot-name) (get-dao referenced-class fk-values)))))
         ((dao-slot-definition-reverse-reference slot)
-         (with-slots (class key many)
+         (with-slots ((referenced-class class) key many)
              (dao-slot-definition-reverse-reference slot)
-           (let ((pk-values (primary-key dao)))
+           (let ((key (or key (primary-key class)))
+                 (pk-values (primary-key dao)))
              (setf (slot-value dao slot-name)
-                   (select-dao class
-                               :where (dao-test-sql-string (find-class class)
+                   (select-dao referenced-class
+                               :where (dao-test-sql-string referenced-class
                                                            :columns key
                                                            :values pk-values)
                                :limit (when (not many) 1))))))
@@ -448,6 +448,9 @@ violation, update it instead."
     (query-dao class query :reader reader)))
 
 (defgeneric dao-test-sql-string (thing &key &allow-other-keys))
+
+(defmethod dao-test-sql-string ((class-name symbol) &rest keywords)
+  (apply #'dao-test-sql-string (find-class class-name) keywords))
 
 (defmethod dao-test-sql-string ((class dao-class)
                                 &key

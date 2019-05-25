@@ -59,7 +59,7 @@
 (defclass organization ()
   ((organization-id :column t :reader organization-id)
    (name :column t :initarg :name :accessor organization-name)
-   (employees :references employee :reverse-key organization-id))
+   (employees :references employee :reverse t))
   (:metaclass dao-class)
   (:table-name organizations)
   (:primary-key organization-id))
@@ -87,7 +87,7 @@ CREATE TABLE employees (
 (defclass employee ()
   ((employee-id :column t :reader employee-id)
    (organization-id :column t :reader organization-id)
-   (organization :references organization :key organization-id)
+   (organization :references organization)
    (name :column t :initarg :name :accessor employee-name)
    (full-time-p :column t :initarg :full-time-p :type boolean :accessor employee-full-time-p)
    (address :column t :initarg :address :accessor employee-address :selectp nil))
@@ -216,14 +216,13 @@ CREATE TABLE employee_tasks (
 
 (defclass employee-task-mixin ()
   ((employee-id :column t :reader employee-id)
-   (employee :references employee :key employee-id)
+   (employee :references employee)
    (task-number :column t :reader task-number))
   (:metaclass dao-class))
 
 (defclass employee-task (employee-task-mixin)
   ((title :column t :reader task-title)
-   (comments :references employee-task-comment
-             :reverse-key (employee-id task-number)))
+   (comments :references employee-task-comment :reverse t))
   (:metaclass dao-class)
   (:table-name employee-tasks)
   (:primary-key employee-id task-number))
@@ -250,7 +249,7 @@ CREATE TABLE employee_task_comments (
 )")
 
 (defclass employee-task-comment (employee-task-mixin)
-  ((task :references employee-task :key (employee-id task-number))
+  ((task :references employee-task)
    (comment-number :column t :reader comment-number)
    (body :column t :reader comment-body))
   (:metaclass dao-class)
