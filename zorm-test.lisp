@@ -58,7 +58,8 @@
 
 (defclass organization ()
   ((organization-id :column t :reader organization-id)
-   (name :column t :initarg :name :accessor organization-name))
+   (name :column t :initarg :name :accessor organization-name)
+   (employees :references employee :reverse-key organization-id))
   (:metaclass dao-class)
   (:table-name organizations)
   (:primary-key organization-id))
@@ -195,6 +196,16 @@ CREATE TABLE employees (
     (is (typep organization 'organization))
     (is (string= "acme" (slot-value organization 'name)))))
 
+(def-transaction-test test-reverse-reference-single-key (:suite db-tests)
+  (let ((org-id (insert-organization-raw "acme")))
+    (insert-employee-raw "foo" :null :null org-id)
+    (insert-employee-raw "bar" t :null org-id)
+    (let* ((org (get-dao 'organization org-id))
+           (employees (slot-value org 'employees)))
+      (is (= 2 (length employees)))
+      (is (find "foo" employees :key #'employee-name :test #'string=))
+      (is (find "bar" employees :key #'employee-name :test #'string=)))))
+
 (add-ddl-statement "
 CREATE TABLE employee_tasks (
   employee_id integer NOT NULL REFERENCES employees,
@@ -210,7 +221,9 @@ CREATE TABLE employee_tasks (
   (:metaclass dao-class))
 
 (defclass employee-task (employee-task-mixin)
-  ((title :column t :reader task-title))
+  ((title :column t :reader task-title)
+   (comments :references employee-task-comment
+             :reverse-key (employee-id task-number)))
   (:metaclass dao-class)
   (:table-name employee-tasks)
   (:primary-key employee-id task-number))
@@ -265,6 +278,17 @@ CREATE TABLE employee_task_comments (
          (task (slot-value comment 'task)))
     (is (typep task 'employee-task))
     (is (string= "first task" (slot-value task 'title)))))
+
+(def-transaction-test test-reverse-reference-composite-key (:suite db-tests)
+  (let* ((employee-id (insert-employee-raw "foo" :null :null))
+         (task-number (insert-employee-task-raw employee-id "first task")))
+    (insert-employee-task-comment-raw employee-id task-number "first task first comment")
+    (insert-employee-task-comment-raw employee-id task-number "first task second comment")
+    (let* ((task (get-dao 'employee-task (list employee-id task-number)))
+           (comments (slot-value task 'comments)))
+      (is (= 2 (length comments)))
+      (is (find "first task first comment" comments :key #'comment-body :test #'string=))
+      (is (find "first task second comment" comments :key #'comment-body :test #'string=)))))
 
 ;;; utils
 
