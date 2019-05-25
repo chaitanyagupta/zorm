@@ -56,8 +56,37 @@
      (with-fixture transaction-fixture ()
        ,@body)))
 
+(defclass organization ()
+  ((organization-id :column t :reader organization-id)
+   (name :column t :initarg :name :accessor organization-name))
+  (:metaclass dao-class)
+  (:table-name organizations)
+  (:primary-key organization-id))
+
+(add-ddl-statement "
+CREATE TABLE organizations (
+  organization_id serial PRIMARY KEY,
+  name text NOT NULL
+)")
+
+(defun insert-organization-raw (name)
+  (postmodern:query (format nil "INSERT INTO organizations (name) VALUES (~A) RETURNING organization_id"
+                            (s-sql:sql-escape name))
+                    :single))
+
+(add-ddl-statement "
+CREATE TABLE employees (
+  employee_id serial PRIMARY KEY,
+  organization_id integer REFERENCES organizations,
+  name text NOT NULL,
+  full_time_p boolean,
+  address text
+)")
+
 (defclass employee ()
   ((employee-id :column t :reader employee-id)
+   (organization-id :column t :reader organization-id)
+   (organization :references organization :key organization-id)
    (name :column t :initarg :name :accessor employee-name)
    (full-time-p :column t :initarg :full-time-p :type boolean :accessor employee-full-time-p)
    (address :column t :initarg :address :accessor employee-address :selectp nil))
@@ -65,19 +94,13 @@
   (:table-name employees)
   (:primary-key employee-id))
 
-(add-ddl-statement "
-CREATE TABLE employees (
-  employee_id serial PRIMARY KEY,
-  name text not null,
-  full_time_p boolean,
-  address text
-)")
-
-(defun insert-employee-raw (name full-time-p address)
-  (postmodern:execute (format nil "INSERT INTO employees (name, full_time_p, address) VALUES (~A, ~A, ~A)"
+(defun insert-employee-raw (name full-time-p address &optional (organization-id :null))
+  (postmodern:query (format nil "INSERT INTO employees (organization_id, name, full_time_p, address) VALUES (~A, ~A, ~A, ~A) RETURNING employee_id"
+                              (s-sql:sql-escape organization-id)
                               (s-sql:sql-escape name)
                               (s-sql:sql-escape full-time-p)
-                              (s-sql:sql-escape address))))
+                              (s-sql:sql-escape address))
+                    :single))
 
 (def-test test-select-dao-empty-set (:suite db-tests)
   (is (null (select-dao 'employee))))
@@ -163,6 +186,85 @@ CREATE TABLE employees (
                                 (employee-id employee)))
     (refresh-dao employee)
     (is (string= "some other name" (employee-name employee)))))
+
+(def-transaction-test test-slot-reference-single-key (:suite db-tests)
+  (let* ((org-id (insert-organization-raw "acme"))
+         (employee-id (insert-employee-raw "foo" :null :null org-id))
+         (employee (get-dao 'employee employee-id))
+         (organization (slot-value employee 'organization)))
+    (is (typep organization 'organization))
+    (is (string= "acme" (slot-value organization 'name)))))
+
+(add-ddl-statement "
+CREATE TABLE employee_tasks (
+  employee_id integer NOT NULL REFERENCES employees,
+  task_number integer NOT NULL,
+  title text NOT NULL,
+  PRIMARY KEY (employee_id, task_number)
+)")
+
+(defclass employee-task-mixin ()
+  ((employee-id :column t :reader employee-id)
+   (employee :references employee :key employee-id)
+   (task-number :column t :reader task-number))
+  (:metaclass dao-class))
+
+(defclass employee-task (employee-task-mixin)
+  ((title :column t :reader task-title))
+  (:metaclass dao-class)
+  (:table-name employee-tasks)
+  (:primary-key employee-id task-number))
+
+(defun insert-employee-task-raw (employee-id title)
+  (let ((task-number (postmodern:query
+                      (format nil "SELECT COALESCE(max(task_number), 0) + 1 FROM employee_tasks WHERE employee_id = ~A" employee-id)
+                      :single)))
+    (postmodern:execute
+     (format nil "INSERT INTO employee_tasks (employee_id, task_number, title) VALUES (~A, ~A, ~A)"
+             employee-id
+             task-number
+             (s-sql:sql-escape title)))
+    task-number))
+
+(add-ddl-statement "
+CREATE TABLE employee_task_comments (
+  employee_id integer NOT NULL,
+  task_number integer NOT NULL,
+  comment_number integer NOT NULL,
+  body text NOT NULL,
+  FOREIGN KEY (employee_id, task_number) REFERENCES employee_tasks,
+  PRIMARY KEY (employee_id, task_number, comment_number)
+)")
+
+(defclass employee-task-comment (employee-task-mixin)
+  ((task :references employee-task :key (employee-id task-number))
+   (comment-number :column t :reader comment-number)
+   (body :column t :reader comment-body))
+  (:metaclass dao-class)
+  (:table-name employee-task-comments)
+  (:primary-key employee-id task-number comment-number))
+
+(defun insert-employee-task-comment-raw (employee-id task-number body)
+  (let ((comment-number (postmodern:query
+                         (format nil "SELECT COALESCE(max(comment_number), 0) + 1 FROM employee_task_comments WHERE employee_id = ~A AND task_number = ~A"
+                                 employee-id task-number)
+                         :single)))
+    (postmodern:execute
+     (format nil "INSERT INTO employee_task_comments (employee_id, task_number, comment_number, body) VALUES (~A, ~A, ~A, ~A)"
+             employee-id
+             task-number
+             comment-number
+             (s-sql:sql-escape body)))
+    comment-number))
+
+(def-transaction-test test-slot-reference-composite-key (:suite db-tests)
+  (let* ((employee-id (insert-employee-raw "foo" :null :null))
+         (task-number (insert-employee-task-raw employee-id "first task"))
+         (comment-number (insert-employee-task-comment-raw employee-id task-number "first task first comment"))
+         (comment (get-dao 'employee-task-comment (list employee-id task-number comment-number)))
+         (task (slot-value comment 'task)))
+    (is (typep task 'employee-task))
+    (is (string= "first task" (slot-value task 'title)))))
 
 ;;; utils
 
