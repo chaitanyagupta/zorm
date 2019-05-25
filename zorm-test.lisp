@@ -60,7 +60,7 @@
   ((employee-id :column t :reader employee-id)
    (name :column t :initarg :name :accessor employee-name)
    (full-time-p :column t :initarg :full-time-p :type boolean :accessor employee-full-time-p)
-   (address :column t :initarg :address :accessor employee-address :default nil))
+   (address :column t :initarg :address :accessor employee-address :selectp nil))
   (:metaclass dao-class)
   (:table-name employees)
   (:primary-key employee-id))
