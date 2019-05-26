@@ -39,8 +39,8 @@ Create a few tables in the `zorm-examples` database by loading this file:
 CREATE TABLE organizations (
   organization_id serial PRIMARY KEY,
   name text NOT NULL,
-  created_on date NOT NULL DEFAULT CURRENT_DATE,
-  address text
+  address text,
+  non_profit_p boolean
 );
 
 CREATE TABLE employeees (
@@ -59,7 +59,7 @@ Now load zorm and connect to the database from Lisp:
 
 Ensure that you are using the `ZORM` package, or make a new package that uses it.
 
-### Class definition
+### Class definitions
 
 Rows in a database table are parsed into data access objects (DAOs). One row is
 parsed into a single DAO. We define an `ORGANIZATION` class to represent the
@@ -68,15 +68,16 @@ parsed into a single DAO. We define an `ORGANIZATION` class to represent the
 ```lisp
 (defclass organization ()
   ((organization-id :column t :reader organization-id)
-   (name :column t :initarg :name :accessor organization-name)
-   (created-on :column t :accessor created-on))
+   (name :column t :initarg :name)
+   (address :column t :initarg :address)
+   (non-profit-p :column t :type boolean :initarg :non-profit-p))
   (:metaclass dao-class)
   (:table-name organizations)
   (:primary-key organization-id))
 
 (defmethod print-object ((organization organization) stream)
   (print-unreadable-object (organization stream :type t :identity t)
-    (write-string (organization-name organization) stream)))
+    (write-string (slot-value organization 'name) stream)))
 ```
 
 A few things to note here:
@@ -167,7 +168,7 @@ primary key lookup.
 Use `UPDATE-DAO` to save an updated object in the database.
 
 ```lisp
-(setf (organization-name *org*) "acme2")
+(setf (slot-value *org* 'name) "acme2")
 => "acme2"
 
 (update-dao *org*)
@@ -186,7 +187,7 @@ object.
 ; CL-POSTGRES query (2ms): INSERT INTO organizations (name) VALUES (E'uiop') RETURNING address, created_on, organization_id
 => #<ORGANIZATION uiop {1002A45CD3}>
 
-(setf (organization-name *org*) "acme")
+(setf (slot-value *org* 'name) "acme")
 => "acme"
 
 (save-dao *org*)
@@ -215,4 +216,33 @@ we want its updated values.
 (refresh-dao *org*)
 ; CL-POSTGRES query (1ms): SELECT address, created_on, name, organization_id FROM organizations WHERE organization_id = 1
 => #<ORGANIZATION acme {1002823A33}>
+```
+
+### Handling NULL values
+
+The database's `NULL` translates to CL's `NIL` and vice-versa, with one
+exception: if the type of a column slot is `BOOLEAN`, then `NIL` translates to
+`false` in the database. To explicitly set the a boolean slot to `NULL` in the
+database, use `(SETF DB-NULL-P)`.
+
+Notice the values set in the database in the printed SQL query in examples
+below (remember that the type for the slot `NON-PROFIT-P` is `BOOLEAN`):
+
+```lisp
+(defparameter *org2* (insert-dao (make-instance 'organization :name "abc" :non-profit-p t :address "pluto")))
+; CL-POSTGRES query (2ms): INSERT INTO organizations (non_profit_p, address, name) VALUES (true, E'pluto', E'abc') RETURNING organization_id
+=> *ORG2*
+
+(progn
+  (setf (slot-value *org2* 'address) nil
+        (slot-value *org2* 'non-profit-p) nil)
+  (update-dao *org2*))
+; CL-POSTGRES query (2ms): UPDATE organizations SET address = NULL, non_profit_p = false WHERE organization_id = 4
+=> NIL
+
+(progn
+  (setf (db-null-p *org2* 'non-profit-p) t)
+  (update-dao *org2*))
+; CL-POSTGRES query (2ms): UPDATE organizations SET non_profit_p = NULL WHERE organization_id = 4
+=> NIL
 ```
