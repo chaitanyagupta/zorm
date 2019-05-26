@@ -39,14 +39,14 @@ Create a few tables in the `zorm-examples` database by loading this file:
 CREATE TABLE organizations (
   organization_id serial PRIMARY KEY,
   name text NOT NULL,
-  created_on date NOT NULL DEFAULT CURRENT_DATE
+  created_on date NOT NULL DEFAULT CURRENT_DATE,
+  address text
 );
 
 CREATE TABLE employeees (
   organization_id integer NOT NULL REFERENCES organizations,
   employee_id integer NOT NULL,
   name text NOT NULL,
-  joined_on date NOT NULL DEFAULT CURRENT_DATE,
   PRIMARY KEY (organization_id, employee_id)
 );
 ```
@@ -62,8 +62,8 @@ Ensure that you are using the `ZORM` package, or make a new package that uses it
 ### Class definition
 
 Rows in a database table are parsed into data access objects (DAOs). One row is
-parsed into a single DAO object. We define an `ORGANIZATION` class to represent
-the `organizations` database table.
+parsed into a single DAO. We define an `ORGANIZATION` class to represent the
+`organizations` database table.
 
 ```lisp
 (defclass organization ()
@@ -73,6 +73,10 @@ the `organizations` database table.
   (:metaclass dao-class)
   (:table-name organizations)
   (:primary-key organization-id))
+
+(defmethod print-object ((organization organization) stream)
+  (print-unreadable-object (organization stream :type t :identity t)
+    (write-string (organization-name organization) stream)))
 ```
 
 A few things to note here:
@@ -89,11 +93,11 @@ Let's create an organization and insert it in the database.
 
 ```lisp
 (defparameter *org* (insert-dao (make-instance 'organization :name "acme")))
-; CL-POSTGRES query (14ms): INSERT INTO organizations (name) VALUES (E'acme') RETURNING created_on, organization_id
+; CL-POSTGRES query (5ms): INSERT INTO organizations (name) VALUES (E'acme') RETURNING address, created_on, organization_id
 => *ORG*
 
 (describe *org*)
-; #<ORGANIZATION {100402B933}>
+; #<ORGANIZATION acme {1002823A33}>
 ;   [standard-object]
 ;
 ; Slots with :INSTANCE allocation:
@@ -101,12 +105,14 @@ Let's create an organization and insert it in the database.
 ;   ORGANIZATION-ID                = 1
 ;   NAME                           = "acme"
 ;   CREATED-ON                     = 3767817600
+;   ADDRESS                        = NIL
 ```
 
-Here we did not provide `ORGANIZATION-ID` and `CREATED-ON`, however `INSERT-DAO`
-still works: it fetches the default value assigned to their respective columns
-by the database, and sets those values in the relevant slots. This behaviour is,
-in fact, required when you have a primary key column with a `serial` type.
+Here we did not provide `ORGANIZATION-ID`, `ADDRESS` and `CREATED-ON`, however
+`INSERT-DAO` still works: it fetches the default value assigned to their
+respective columns by the database, and sets those values in the relevant
+slots. This behaviour is, in fact, required when you have a primary key column
+with a `serial` type.
 
 (Note that `DESCRIBE` also outputs a couple of book-keeping slots, however we
 have snipped them here. Their names are internal to the `ZORM` package so they
@@ -127,11 +133,10 @@ The main querying function is `SELECT-DAO`.
 
 ```lisp
 (select-dao 'organization)
-; CL-POSTGRES query (1ms): SELECT created_on, name, organization_id FROM organizations
-=> (#<ORGANIZATION {100197C483}> #<ORGANIZATION {100197C6E3}>
-    #<ORGANIZATION {100197C943}> #<ORGANIZATION {100197CBA3}>
-    #<ORGANIZATION {100197CE03}>)
-
+; CL-POSTGRES query (3ms): SELECT address, created_on, name, organization_id FROM organizations
+=> (#<ORGANIZATION acme {10029E95F3}> #<ORGANIZATION asdf {10029E98A3}>
+    #<ORGANIZATION qwerty {10029E9B53}> #<ORGANIZATION zxcv {10029E9E03}>
+    #<ORGANIZATION hjkl {10029EA0B3}>)
 ```
 
 `SELECT-DAO` takes a number of keyword arguments, including `WHERE`, `ORDER-BY`,
@@ -139,13 +144,13 @@ The main querying function is `SELECT-DAO`.
 
 ```lisp
 (select-dao 'organization :where "name = 'acme'")
-; CL-POSTGRES query (16ms): SELECT created_on, name, organization_id FROM organizations WHERE name = 'acme'
-=> (#<ORGANIZATION {10019CDD03}>)
+; CL-POSTGRES query (2ms): SELECT address, created_on, name, organization_id FROM organizations WHERE name = 'acme'
+=> (#<ORGANIZATION acme {10029ED533}>)
 
 (select-dao 'organization :order-by "created_on ASC" :limit 3)
-; CL-POSTGRES query (5ms): SELECT created_on, name, organization_id FROM organizations ORDER BY created_on ASC LIMIT 3
-=> (#<ORGANIZATION {1001BE8503}> #<ORGANIZATION {1001BE8763}>
-    #<ORGANIZATION {1001BE89C3}>)
+; CL-POSTGRES query (2ms): SELECT address, created_on, name, organization_id FROM organizations ORDER BY created_on ASC LIMIT 3
+=> (#<ORGANIZATION acme {1002A086D3}> #<ORGANIZATION asdf {1002A08983}>
+    #<ORGANIZATION qwerty {1002A08C33}>)
 ```
 
 Another querying function is `GET-DAO`, which returns a single object using a
@@ -153,8 +158,8 @@ primary key lookup.
 
 ```lisp
 (get-dao 'organization 1)
-; CL-POSTGRES query (1ms): SELECT created_on, name, organization_id FROM organizations WHERE organization_id = 1
-#<ORGANIZATION {1001D35643}>
+; CL-POSTGRES query (1ms): SELECT address, created_on, name, organization_id FROM organizations WHERE organization_id = 1
+=> #<ORGANIZATION acme {1002A0C033}>
 ```
 
 ### Updates
@@ -178,8 +183,11 @@ object.
 
 ```lisp
 (save-dao (make-instance 'organization :name "uiop"))
-; CL-POSTGRES query (3ms): INSERT INTO organizations (name) VALUES (E'uiop') RETURNING created_on, organization_id
-=> #<ORGANIZATION {1001F40C43}>
+; CL-POSTGRES query (2ms): INSERT INTO organizations (name) VALUES (E'uiop') RETURNING address, created_on, organization_id
+=> #<ORGANIZATION uiop {1002A45CD3}>
+
+(setf (organization-name *org*) "acme")
+=> "acme"
 
 (save-dao *org*)
 ; CL-POSTGRES query (3ms): UPDATE organizations SET name = E'acme' WHERE organization_id = 1
@@ -195,4 +203,16 @@ This is done using `DELETE-DAO`.
 ; CL-POSTGRES query (1ms): SELECT created_on, name, organization_id FROM organizations WHERE organization_id = 2
 ; CL-POSTGRES query (3ms): DELETE FROM organizations WHERE organization_id = 2
 => NIL
+```
+
+### Refreshes
+
+A DAO can also be refreshed i.e. it's column values refetched from the
+database. This is useful when another process changes the value in the database,
+and we want the updated values.
+
+```lisp
+(refresh-dao *org*)
+; CL-POSTGRES query (1ms): SELECT address, created_on, name, organization_id FROM organizations WHERE organization_id = 1
+=> #<ORGANIZATION acme {1002823A33}>
 ```
