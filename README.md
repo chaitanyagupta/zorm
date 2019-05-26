@@ -43,7 +43,7 @@ CREATE TABLE organizations (
   non_profit_p boolean
 );
 
-CREATE TABLE employeees (
+CREATE TABLE employees (
   organization_id integer NOT NULL REFERENCES organizations,
   employee_id integer NOT NULL,
   name text NOT NULL,
