@@ -207,9 +207,9 @@ This is done using `DELETE-DAO`.
 
 ### Refreshes
 
-A DAO can also be refreshed i.e. it's column values refetched from the
-database. This is useful when another process changes the value in the database,
-and we want the updated values.
+A DAO can also be refreshed i.e. it's column values are refetched from the
+database. This is useful when another process updates a row in the database, and
+we want its updated values.
 
 ```lisp
 (refresh-dao *org*)
