@@ -240,9 +240,15 @@ below (remember that the type for the slot `NON-PROFIT-P` is `BOOLEAN`):
 ; CL-POSTGRES query (2ms): UPDATE organizations SET address = NULL, non_profit_p = false WHERE organization_id = 4
 => NIL
 
+(db-null-p *org2* 'non-profit-p)
+=> NIL
+
 (progn
   (setf (db-null-p *org2* 'non-profit-p) t)
   (update-dao *org2*))
 ; CL-POSTGRES query (2ms): UPDATE organizations SET non_profit_p = NULL WHERE organization_id = 4
 => NIL
+
+(db-null-p *org2* 'non-profit-p)
+=> T
 ```
