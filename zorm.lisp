@@ -242,31 +242,34 @@ find-primary-key-info function."))
 (defvar *class-finalize-lock* (bt:make-lock))
 
 (defmethod finalize-inheritance ((class dao-class))
-  #+thread-support
-  (let ((previously-finalized-p (class-finalized-p class)))
-    ;; previously-finalized-p helps us distinguish between the case where we are
-    ;; trying to re-finalize the class v/s race conditions
-    (bt:with-lock-held (*class-finalize-lock*)
-      (when (or (not (class-finalized-p class)) previously-finalized-p)
-        (call-next-method))))
-  #-thread-support
-  (call-next-method)
+  (flet
+      ((finalize-unsafe ()
+         (call-next-method)
 
-  ;; set the primary key
-  (setf (slot-value class 'effective-primary-key)
-        (or (direct-primary-key class)
-            (some #'primary-key (rest (dao-superclasses class)))))
-  (unless (every (lambda (x) (member x (dao-class-column-slot-names class))) (primary-key class))
-    (error "Class ~A has a key that is not also a slot." (class-name class)))
+         ;; set the primary key
+         (setf (slot-value class 'effective-primary-key)
+               (or (direct-primary-key class)
+                   (some #'primary-key (rest (dao-superclasses class)))))
+         (unless (every (lambda (x) (member x (dao-class-column-slot-names class))) (primary-key class))
+           (error "Class ~A has a key that is not also a slot." (class-name class)))
 
-  ;; set up column name->slot mapping
-  (setf (slot-value class 'column-map)
-        (mapcar (lambda (s)
-                  (cons (dao-column-definition-sql-name
-                         (dao-slot-definition-column s))
-                        (slot-definition-name s)))
-                (dao-class-column-slots class)))
-  (values))
+         ;; set up column name->slot mapping
+         (setf (slot-value class 'column-map)
+               (mapcar (lambda (s)
+                         (cons (dao-column-definition-sql-name
+                                (dao-slot-definition-column s))
+                               (slot-definition-name s)))
+                       (dao-class-column-slots class)))
+         (values)))
+    #+thread-support
+    (let ((previously-finalized-p (class-finalized-p class)))
+      ;; previously-finalized-p helps us distinguish between the case where we are
+      ;; trying to re-finalize the class v/s race conditions
+      (bt:with-recursive-lock-held (*class-finalize-lock*)
+        (when (or (not (class-finalized-p class)) previously-finalized-p)
+          (finalize-unsafe))))
+    #-thread-support
+    (finalize-unsafe)))
 
 (defmethod (setf slot-value-using-class) :after (new-value (class dao-class) dao (slot dao-effective-slot-definition))
   (when (dao-slot-definition-column slot)
