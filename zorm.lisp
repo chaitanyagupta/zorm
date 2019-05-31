@@ -276,6 +276,7 @@ find-primary-key-info function."))
     (finalize-unsafe)))
 
 (defvar *reference-slot-under-update* nil)
+(defvar *setting-unbound-reference-slot* nil)
 
 (defmethod (setf slot-value-using-class) :after (new-value (class dao-class) dao (slot dao-effective-slot-definition))
   ;; Column slots
@@ -303,7 +304,7 @@ find-primary-key-info function."))
        :do (slot-makunbound dao (slot-definition-name reference-slot))))
   ;; Reference slots
   (let ((reference (dao-slot-definition-reference slot)))
-    (when reference
+    (when (and reference (not *setting-unbound-reference-slot*))
       (let* ((referenced-class (dao-reference-definition-class reference))
              (key (dao-reference-definition-key reference))
              (*reference-slot-under-update* slot))
@@ -350,7 +351,8 @@ find-primary-key-info function."))
            (let* ((key (or key (primary-key referenced-class)))
                   (fk-values (mapcar (lambda (slot-name)
                                        (slot-value dao slot-name))
-                                     key)))
+                                     key))
+                  (*setting-unbound-reference-slot* t))
              (setf (slot-value dao slot-name) (get-dao referenced-class fk-values)))))
         ((dao-slot-definition-reverse-reference slot)
          (with-slots ((referenced-class class) key many)
