@@ -69,8 +69,8 @@ queries zorm makes as we go through the tutorial.
 ### Class definitions
 
 Rows in a database table are parsed into data access objects (DAOs). One row is
-parsed into a single DAO. We define an `ORGANIZATION` class to represent the
-`organizations` database table.
+parsed into a single DAO. We define an `ORGANIZATION` class to represent rows in
+the `organizations` database table.
 
 ```cl
 (defclass organization ()
@@ -93,7 +93,7 @@ A few things to note here:
    of this library.
 2. The `TABLE-NAME` and `PRIMARY-KEY` options provide the name of the
    corresponding table and its primary key in the database.
-3. Every slot that corresponds to a table column should set the `COLUMN` option.
+3. A slot that corresponds to a table column should set the `COLUMN` option.
 
 ### Insertion
 
@@ -264,4 +264,166 @@ below (remember that the type for the slot `NON-PROFIT-P` is `BOOLEAN`):
 
 (db-null-p *org2* 'non-profit-p)
 => T
+```
+
+### Relations
+
+#### Direct references
+
+Let's define an `EMPLOYEE` class to represent rows in the `employees` table.
+
+```cl
+(defclass employee ()
+  ((organization-id :column t :initarg :organization-id :reader organization-id)
+   (employee-id :column t :initarg :employee-id :reader employee-id)
+   (name :column t :initarg :name)
+   (organization :references organization :initarg :organization))
+n  (:metaclass dao-class)
+  (:table-name employees)
+  (:primary-key organization-id employee-id))
+
+(defmethod print-object ((employee employee) stream)
+  (print-unreadable-object (employee stream :type t :identity t)
+    (write-string (slot-value employee 'name) stream)))
+```
+
+Take note of the `ORGANIZATION` slot -- this is known as a reference slot since
+it references another DAO class (`ORGANIZATION` in this case).
+
+Whenever the slot `ORGANIZATION` is set (either during object initialization or
+later), the primary key slot names of the referenced class -- `ORGANIZATION-ID`
+in this case -- are looked up in the referencing class and set.
+
+This is similar to how the `employees` table in the db relates to the
+`organizations` table via the `organization_id` foreign key column.
+
+```cl
+(defparameter *alice* (insert-dao (make-instance 'employee
+                                                 :name "alice"
+                                                 :organization *org*
+                                                 :employee-id 1)))
+; CL-POSTGRES query (3ms): INSERT INTO employees (name, employee_id, organization_id) VALUES (E'alice', 1, 1)
+=> *ALICE*
+
+(describe *ALICE*)
+; #<EMPLOYEE alice {1003F64933}>
+;   [standard-object]
+;
+; Slots with :INSTANCE allocation:
+;   DB-NULL-SLOT-NAMES             = NIL
+;   DIRTY-SLOT-NAMES               = NIL
+;   ORGANIZATION-ID                = 1
+;   EMPLOYEE-ID                    = 1
+;   NAME                           = "alice"
+;   ORGANIZATION                   = #<ORGANIZATION acme {1005FF83E3}>
+```
+
+You can also update the key slot of a reference directly. This will cause all
+the reference slots using it to become unbound. Fetching the reference slot next
+time will return a fresh object.
+
+```cl
+(setf (slot-value *alice* 'organization-id) 3)
+=> 3
+
+(describe *alice*)
+; #<EMPLOYEE alice {1003F64933}>
+;   [standard-object]
+;
+; Slots with :INSTANCE allocation:
+;   DB-NULL-SLOT-NAMES             = NIL
+;   DIRTY-SLOT-NAMES               = (ORGANIZATION-ID)
+;   ORGANIZATION-ID                = 3
+;   EMPLOYEE-ID                    = 1
+;   NAME                           = "alice"
+;   ORGANIZATION                   = #<unbound slot>
+;
+;; No value
+
+(slot-value *alice* 'organization)
+; CL-POSTGRES query (1ms): SELECT non_profit_p, address, name, organization_id FROM organizations WHERE organization_id = 3
+=> #<ORGANIZATION qwerty {1003F64933}>
+```
+
+Next we will describe reverse references, but before going further, let's define
+a few more employees.
+
+```cl
+(insert-dao (make-instance 'employee
+                           :name "bob"
+                           :organization *org*
+                           :employee-id 2))
+
+(insert-dao (make-instance 'employee
+                           :name "eve"
+                           :organization *org*
+                           :employee-id 3))
+```
+
+#### Reverse references
+
+A reverse reference, as the name indicates, refers to the reverse of a direct
+reference. So if an `EMPLOYEE` references an `ORGANIZATION`, an `ORGANIZATION`
+has a list of `EMPLOYEES`.
+
+Here's our redefined `ORGANIZATION` class with an
+
+```cl
+(defclass organization ()
+  ((organization-id :column t :reader organization-id)
+   (name :column t :initarg :name)
+   (address :column t :initarg :address)
+   (non-profit-p :column t :type boolean :initarg :non-profit-p)
+   (employees :references employee :reverse t))
+  (:metaclass dao-class)
+  (:table-name organizations)
+  (:primary-key organization-id))
+```
+
+`EMPLOYEES` is the reverse reference, notice the presence of `:REVERSE T` in its
+options.
+
+When this slot value is accessed, a SELECT query is made to fetch the list of
+employees belonging to this organization.
+
+```cl
+(slot-value *org* 'employees)
+; CL-POSTGRES query (1ms): SELECT name, organization_id, employee_id FROM employees WHERE organization_id = 1
+=> (#<EMPLOYEE alice {1003F64933}> #<EMPLOYEE eve {1003F64BD3}>
+    #<EMPLOYEE bob {1003F64E73}>)
+```
+
+It is important to note that the value of a reverse reference slot is cached
+after the first time it is fetched for an object. You can refresh this value by
+either using `REFRESH-DAO` or by making the slot unbound via `SLOT-MAKUNBOUND`.
+
+#### Non-matching reference keys
+
+If the name of the key in the referencing class differs from the primary key in
+the referenced class, additional options need to be provided.
+
+The following two classes are variants of the `ORGANIZATION` and `EMPLOYEE`
+respectively. Instead of an `ORGANIZATION-ID`, the `EMPLOYEE2` class has a
+`MY-ORG-ID` slot. This requires us to provide the `:KEY` and `:REVERSE-KEY`
+options while defining the reference slots.
+
+```cl
+(defclass organization2 ()
+  ((organization-id :column t :reader organization-id)
+   (name :column t :initarg :name)
+   (address :column t :initarg :address)
+   (non-profit-p :column t :type boolean :initarg :non-profit-p)
+   (employees :references employee2 :reverse t :reverse-key my-org-id))
+  (:metaclass dao-class)
+  (:table-name organizations)
+  (:primary-key organization-id))
+
+(defclass employee2 ()
+  ((my-org-id :column t :col-name organization-id :initarg :my-org-id)
+   (employee-id :column t :initarg :employee-id :reader employee-id)
+   (name :column t :initarg :name)
+   (organization :references organization2 :key my-org-id :initarg :organization))
+  (:metaclass dao-class)
+  (:table-name employees)
+  (:primary-key my-org-id employee-id))
 ```
