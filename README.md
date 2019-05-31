@@ -10,6 +10,28 @@ and [CL-postgres][], it's salient features are:
 [Postmodern]: http://marijnhaverbeke.nl/postmodern/
 [CL-postgres]: http://marijnhaverbeke.nl/postmodern/cl-postgres.html
 
+## Table of Contents
+
+<!-- START doctoc generated TOC please keep comment here to allow auto update -->
+<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->
+
+
+- [Installation](#installation)
+- [Tutorial](#tutorial)
+  - [Class definitions](#class-definitions)
+  - [Insertion](#insertion)
+  - [Querying](#querying)
+  - [Updates](#updates)
+  - [Deletion](#deletion)
+  - [Refreshes](#refreshes)
+  - [Handling NULL values](#handling-null-values)
+  - [Relations](#relations)
+    - [Direct references](#direct-references)
+    - [Reverse references](#reverse-references)
+    - [Non-matching reference keys](#non-matching-reference-keys)
+
+<!-- END doctoc generated TOC please keep comment here to allow auto update -->
+
 ## Installation
 
 Until the project is added to quicklisp, the easiest way to install it is to
