@@ -78,7 +78,11 @@
 
 (defclass dao-reference-definition ()
   ((class :initarg :class :reader dao-reference-definition-class)
-   (key :initarg :key :initform nil :reader dao-reference-definition-key)))
+   (key :initarg :key :initform nil :reader %dao-reference-definition-key)))
+
+(defmethod dao-reference-definition-key ((reference dao-reference-definition))
+  (or (%dao-reference-definition-key reference)
+      (primary-key (dao-reference-definition-class reference))))
 
 (defclass dao-reverse-reference-definition ()
   ((class :initarg :class :reader dao-reverse-reference-definition-class)
@@ -271,9 +275,14 @@ find-primary-key-info function."))
     #-thread-support
     (finalize-unsafe)))
 
+(defvar *reference-slot-under-update* nil)
+
 (defmethod (setf slot-value-using-class) :after (new-value (class dao-class) dao (slot dao-effective-slot-definition))
+  ;; Column slots
   (when (dao-slot-definition-column slot)
+    ;; Mark slot as dirty
     (pushnew (slot-definition-name slot) (dao-dirty-slot-names dao))
+    ;; Handle NIL
     (with-slots (db-null-slot-names)
         dao
       (let ((slot-name (slot-definition-name slot)))
@@ -282,7 +291,27 @@ find-primary-key-info function."))
            (setf db-null-slot-names (remove slot-name db-null-slot-names)))
           ((not (eql (slot-definition-type slot) 'boolean))
            (pushnew slot-name db-null-slot-names))
-          (t nil))))))
+          (t nil))))
+    ;; If this slot is a key in a reference slot, make the latter slot
+    ;; unbound. So that the next it is fetched, we get the updated value from
+    ;; the database.
+    (loop
+       :for reference-slot :in (dao-class-reference-slots class)
+       :for reference = (dao-slot-definition-reference reference-slot)
+       :when (and (member (slot-definition-name slot) (dao-reference-definition-key reference))
+                  (not (eql reference-slot *reference-slot-under-update*)))
+       :do (slot-makunbound dao (slot-definition-name reference-slot))))
+  ;; Reference slots
+  (let ((reference (dao-slot-definition-reference slot)))
+    (when reference
+      (let* ((referenced-class (dao-reference-definition-class reference))
+             (key (dao-reference-definition-key reference))
+             (*reference-slot-under-update* slot))
+        (loop
+           :for referenced-pk-slot-name :in (primary-key referenced-class)
+           :for referenced-pk-value :in (primary-key new-value)
+           :for key-slot-name :in key
+           :do (setf (slot-value dao key-slot-name) referenced-pk-value))))))
 
 (defun db-null-p (dao slot-name)
   (and (null (slot-value dao slot-name))
