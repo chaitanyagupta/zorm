@@ -601,7 +601,10 @@ violation, update it instead."
                                        :where (dao-test-sql-string dao))))
     (mapcar (lambda (slot-name)
               (slot-makunbound dao slot-name))
-            (dao-class-column-slot-names class))
+            (mapcar #'slot-definition-name
+                    (append (dao-class-column-slots class)
+                            (dao-class-reference-slots class)
+                            (dao-class-reverse-reference-slots class))))
     (exec-query *database* query (dao-update-reader dao))
     (setf (dao-dirty-slot-names dao) nil)
     dao))
