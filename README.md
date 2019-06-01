@@ -300,7 +300,7 @@ Let's define an `EMPLOYEE` class to represent rows in the `employees` table.
    (employee-id :column t :initarg :employee-id :reader employee-id)
    (name :column t :initarg :name)
    (organization :references organization :initarg :organization))
-n  (:metaclass dao-class)
+  (:metaclass dao-class)
   (:table-name employees)
   (:primary-key organization-id employee-id))
 
@@ -388,7 +388,7 @@ A reverse reference, as the name indicates, refers to the reverse of a direct
 reference. So if an `EMPLOYEE` references an `ORGANIZATION`, an `ORGANIZATION`
 has a list of `EMPLOYEES`.
 
-Here's our redefined `ORGANIZATION` class with an
+Here's our redefined `ORGANIZATION` class with the reverse reference in place:
 
 ```cl
 (defclass organization ()
