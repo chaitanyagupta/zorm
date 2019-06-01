@@ -31,6 +31,7 @@ and [CL-postgres][], it's salient features are:
     - [Non-matching reference keys](#non-matching-reference-keys)
   - [Composite keys](#composite-keys)
   - [Lazy slots](#lazy-slots)
+- [Running tests](#running-tests)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -539,3 +540,32 @@ key values are always fetched.
 Instead of a list, you can also provide the keywords `:ALL` (all columns should
 be fetched, regardless of whether they are lazy or not), or `:DEFAULT` (executes
 the default behaviour).
+
+## Running tests
+
+The library ships with a bunch of unit tests which can be run as follows (do
+this after loading zorm):
+
+```cl
+(asdf:test-system "zorm/test")
+```
+
+The test system requires PostgreSQL too, and, by default, assumes the following
+Postgres credentials are in place:
+
+* username: `zorm_test` (must have the `CREATEDB` role)
+* password: `zorm_test`
+* host: `localhost`
+
+Before every test run, a test database is created (by default `zorm_test_db`),
+and after every run it is discarded. In order to create and drop the test
+database, a maintenance db is assumed to exist (by default `postgres`).
+
+To override any of the defaults above, you can set these variables in the
+`CL-USER` package before running the tests:
+
+* `*ZORM-TEST-USERNAME*`
+* `*ZORM-TEST-PASSWORD*`
+* `*ZORM-TEST-HOST*`
+* `*ZORM-TEST-DB-NAME*`
+* `*ZORM-TEST-MAINTENANCE-DB-NAME*`
