@@ -17,7 +17,7 @@ and [CL-postgres][], it's salient features are:
 
 
 - [Installation](#installation)
-- [Tutorial](#tutorial)
+- [Usage (tutorial)](#usage-tutorial)
   - [Class definitions](#class-definitions)
   - [Insertion](#insertion)
   - [Querying](#querying)
@@ -29,6 +29,8 @@ and [CL-postgres][], it's salient features are:
     - [Direct references](#direct-references)
     - [Reverse references](#reverse-references)
     - [Non-matching reference keys](#non-matching-reference-keys)
+  - [Composite keys](#composite-keys)
+  - [Lazy slots](#lazy-slots)
 
 <!-- END doctoc generated TOC please keep comment here to allow auto update -->
 
@@ -42,9 +44,9 @@ clone the repo, create a symlink to the project directory inside
 (ql:quickload "zorm")
 ```
 
-## Tutorial
+## Usage (tutorial)
 
-The following examples illustrate usage and features of zorm.
+The following examples illustrate usage and features of zorm in tutorial form.
 
 Make sure you have PostgreSQL (10 or above) installed, then create a test
 database:
@@ -69,6 +71,7 @@ CREATE TABLE employees (
   organization_id integer NOT NULL REFERENCES organizations,
   employee_id integer NOT NULL,
   name text NOT NULL,
+  address text,
   PRIMARY KEY (organization_id, employee_id)
 );
 ```
@@ -299,6 +302,7 @@ Let's define an `EMPLOYEE` class to represent rows in the `employees` table.
   ((organization-id :column t :initarg :organization-id :reader organization-id)
    (employee-id :column t :initarg :employee-id :reader employee-id)
    (name :column t :initarg :name)
+   (address :column t :initarg :address)
    (organization :references organization :initarg :organization))
   (:metaclass dao-class)
   (:table-name employees)
@@ -323,12 +327,13 @@ This is similar to how the `employees` table in the db relates to the
 (defparameter *alice* (insert-dao (make-instance 'employee
                                                  :name "alice"
                                                  :organization *org*
-                                                 :employee-id 1)))
-; CL-POSTGRES query (3ms): INSERT INTO employees (name, employee_id, organization_id) VALUES (E'alice', 1, 1)
+                                                 :employee-id 1
+                                                 :address "1st street")))
+; CL-POSTGRES query (2ms): INSERT INTO employees (address, name, employee_id, organization_id) VALUES (E'1st street', E'alice', 1, 1)
 => *ALICE*
 
-(describe *ALICE*)
-; #<EMPLOYEE alice {1003F64933}>
+(describe *alice*)
+; #<EMPLOYEE alice {1003798C83}>
 ;   [standard-object]
 ;
 ; Slots with :INSTANCE allocation:
@@ -337,49 +342,44 @@ This is similar to how the `employees` table in the db relates to the
 ;   ORGANIZATION-ID                = 1
 ;   EMPLOYEE-ID                    = 1
 ;   NAME                           = "alice"
-;   ORGANIZATION                   = #<ORGANIZATION acme {1005FF83E3}>
+;   ADDRESS                        = "1st street"
+;   ORGANIZATION                   = #<ORGANIZATION acme {1002615DC3}>
 ```
 
-You can also update the key slot of a reference directly. This will cause all
-the reference slots using it to become unbound. Fetching the reference slot next
-time will return a fresh object.
+You can also set the foreign key column slot directly instead of the reference
+slot.
 
 ```cl
-(setf (slot-value *alice* 'organization-id) 3)
-=> 3
+(defparameter *bob* (insert-dao (make-instance 'employee
+                                               :name "bob"
+                                               :organization-id 1
+                                               :employee-id 2
+                                               :address "2nd street")))
+; CL-POSTGRES query (2ms): INSERT INTO employees (address, name, employee_id, organization_id) VALUES (E'2nd street', E'bob', 2, 1)
+=> *BOB*
+```
 
-(describe *alice*)
-; #<EMPLOYEE alice {1003F64933}>
+In this case the reference slot, `ORGANIZATION`, will be unbound
+initially. However it is fetched on demand when `SLOT-VALUE` is called.
+
+```cl
+(describe *bob*)
+; #<EMPLOYEE bob {1004D16FF3}>
 ;   [standard-object]
 ;
 ; Slots with :INSTANCE allocation:
 ;   DB-NULL-SLOT-NAMES             = NIL
-;   DIRTY-SLOT-NAMES               = (ORGANIZATION-ID)
-;   ORGANIZATION-ID                = 3
-;   EMPLOYEE-ID                    = 1
-;   NAME                           = "alice"
+;   DIRTY-SLOT-NAMES               = NIL
+;   ORGANIZATION-ID                = 1
+;   EMPLOYEE-ID                    = 2
+;   NAME                           = "bob"
+;   ADDRESS                        = "2nd street"
 ;   ORGANIZATION                   = #<unbound slot>
-;
 ;; No value
 
-(slot-value *alice* 'organization)
-; CL-POSTGRES query (1ms): SELECT non_profit_p, address, name, organization_id FROM organizations WHERE organization_id = 3
-=> #<ORGANIZATION qwerty {1003F64933}>
-```
-
-Next we will describe reverse references, but before going further, let's define
-a few more employees.
-
-```cl
-(insert-dao (make-instance 'employee
-                           :name "bob"
-                           :organization *org*
-                           :employee-id 2))
-
-(insert-dao (make-instance 'employee
-                           :name "eve"
-                           :organization *org*
-                           :employee-id 3))
+(slot-value *bob* 'organization)
+; CL-POSTGRES query (1ms): SELECT non_profit_p, address, name, organization_id FROM organizations WHERE organization_id = 1
+=> #<ORGANIZATION acme {1004D1E783}>
 ```
 
 #### Reverse references
@@ -405,14 +405,13 @@ Here's our redefined `ORGANIZATION` class with the reverse reference in place:
 `EMPLOYEES` is the reverse reference, notice the presence of `:REVERSE T` in its
 options.
 
-When this slot value is accessed, a SELECT query is made to fetch the list of
-employees belonging to this organization.
+When this slot is read, a SELECT query is made to fetch the list of employees
+belonging to this organization.
 
 ```cl
 (slot-value *org* 'employees)
 ; CL-POSTGRES query (1ms): SELECT name, organization_id, employee_id FROM employees WHERE organization_id = 1
-=> (#<EMPLOYEE alice {1003F64933}> #<EMPLOYEE eve {1003F64BD3}>
-    #<EMPLOYEE bob {1003F64E73}>)
+=> (#<EMPLOYEE alice {100524A753}> #<EMPLOYEE bob {100524ABA3}>)
 ```
 
 It is important to note that the value of a reverse reference slot is cached
@@ -449,3 +448,94 @@ options while defining the reference slots.
   (:table-name employees)
   (:primary-key my-org-id employee-id))
 ```
+
+### Composite keys
+
+The `employees` table has a composite primary key made up of two columns:
+`organization_id` and `employee_id`.
+
+Similarly, in the definition of `EMPLOYEE`, the primary key consists of
+`ORGANIZATION-ID` and `EMPLOYEE-ID`.
+
+How do we lookup an object with a composite primary key using `GET-DAO`? Simply
+provide a list of key values, in the same order in which they are declared in
+the class definition:
+
+```cl
+(get-dao 'employee (list 1 1))
+; CL-POSTGRES query (6ms): SELECT name, organization_id, employee_id FROM employees WHERE organization_id = 1 AND employee_id = 1
+=> #<EMPLOYEE alice {1005E20213}>
+```
+
+Similarly, in a reference slot, if you need to specify the `:KEY` or
+`:REVERSE-KEY`, provide a list of slot names instead of a single name for a
+composite primary key.
+
+### Lazy slots
+
+All direct and reverse reference slots are lazy. That is, when you run
+`SELECT-DAO`, only column slots are bound and reference slots are left
+untouched. When you run `SLOT-VALUE` on a reference slot name, it's value is
+fetched on demand.
+
+You can also mark one or more column slots as lazy -- simply set the `:LAZY`
+option in the slot definition.
+
+Let's do this for the `ADDRESS` slot of `EMPLOYEE`:
+
+```cl
+(defclass employee ()
+  ((organization-id :column t :initarg :organization-id :reader organization-id)
+   (employee-id :column t :initarg :employee-id :reader employee-id)
+   (name :column t :initarg :name)
+   (address :column t :initarg :address :lazy t)
+   (organization :references organization :initarg :organization))
+  (:metaclass dao-class)
+  (:table-name employees)
+  (:primary-key organization-id employee-id))
+```
+
+Now when we fetch employees (via `SELECT-DAO` or `GET-DAO`), the `address`
+column by default will not be included.
+
+```cl
+(defparameter *employees* (select-dao 'employee))
+; CL-POSTGRES query (1ms): SELECT name, organization_id, employee_id FROM employees
+=> *EMPLOYEES*
+
+(describe (first *employees*))
+; #<EMPLOYEE alice {100562DA33}>
+;   [standard-object]
+;
+; Slots with :INSTANCE allocation:
+;   DB-NULL-SLOT-NAMES             = NIL
+;   DIRTY-SLOT-NAMES               = NIL
+;   ORGANIZATION-ID                = 1
+;   EMPLOYEE-ID                    = 1
+;   NAME                           = "alice"
+;   ADDRESS                        = #<unbound slot>
+;   ORGANIZATION                   = #<unbound slot>
+```
+
+When we try to read the `ADDRESS` slot, it will be fetched on demand.
+
+```cl
+(slot-value (first *employees*) 'address)
+; CL-POSTGRES query (1ms): SELECT address FROM employees WHERE organization_id = 1 AND employee_id = 1
+=> "1st street"
+```
+
+You can also specify the list of column slots to be fetched directly in the call
+to `SELECT-DAO` or `GET-DAO`. If a lazy column is included in this list, it will
+always be fetched; columns not included will not be fetched. However, primary
+key values are always fetched.
+
+```cl
+(get-dao 'organization 1 :columns (list 'name))
+; CL-POSTGRES query (0ms): SELECT name, organization_id FROM organizations WHERE organization_id = 1
+=> #<ORGANIZATION acme {10036CA7F3}>
+```
+
+Instead of a list, you can also provide the keywords `:ALL` (all columns should
+be fetched, regardless of whether they are lazy or not), or `:DEFAULT` (executes
+the default behaviour).
