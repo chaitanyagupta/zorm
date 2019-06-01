@@ -72,9 +72,9 @@
   ((sql-name :initarg :sql-name
              :initform (error "SQL-NAME of column must be provided")
              :reader dao-column-definition-sql-name)
-   (selectp :initarg :selectp
-            :initform t
-            :reader dao-column-definition-selectp)))
+   (lazyp :initarg :lazy
+          :initform t
+          :reader dao-column-definition-lazyp)))
 
 (defclass dao-reference-definition ()
   ((class :initarg :class :reader dao-reference-definition-class)
@@ -100,7 +100,7 @@
 
 (defmethod shared-initialize :after ((slot dao-direct-slot-definition) slot-names
                                      &key
-                                       column (selectp t) (col-name nil col-name-p)
+                                       column lazy (col-name nil col-name-p)
                                        references key reverse reverse-key (many t)
                                        &allow-other-keys)
   (declare (ignore slot-names))
@@ -112,7 +112,7 @@
                                                                        col-name
                                                                        (slot-definition-name slot))
                                                                    *escape-sql-names-p* t)
-                                            :selectp selectp)))
+                                            :lazy lazy)))
       (setf (slot-value slot 'column) column-definition)))
   (when references
     (when (and key (or reverse reverse-key))
@@ -167,8 +167,8 @@
   (dao-column-definition-sql-name
    (dao-slot-definition-column (find-dao-slot dao slot-name t))))
 
-(defun dao-column-slot-selectp (dao slot-name)
-  (dao-column-definition-selectp
+(defun dao-column-slot-lazyp (dao slot-name)
+  (dao-column-definition-lazyp
    (dao-slot-definition-column (find-dao-slot dao slot-name t))))
 
 (defun dao-reference-slot-p (dao slot-name)
@@ -186,11 +186,10 @@
 (defun dao-class-column-slot-names (class)
   (mapcar 'slot-definition-name (dao-class-column-slots class)))
 
-(defun dao-class-column-selectp-slots (class)
-  (remove-if-not (lambda (slot)
-                   (dao-column-definition-selectp
-                    (dao-slot-definition-column slot)))
-                 (dao-class-column-slots class)))
+(defun dao-class-column-default-slots (class)
+  (remove-if (lambda (slot)
+               (dao-column-definition-lazyp (dao-slot-definition-column slot)))
+             (dao-class-column-slots class)))
 
 (defgeneric primary-key (class)
   (:documentation "Returns list of slot names that are the primary key of DAO
@@ -453,7 +452,8 @@ violation, update it instead."
                                  (mapcar #'slot-definition-name
                                          (ecase columns
                                            (:all (dao-class-column-slots class))
-                                           (:default (dao-class-column-selectp-slots class))
+                                           (:default (dao-class-column-default-slots class))
+                                           ((nil) nil)
                                            (t (error "Unknown value for COLUMNS")))))
                              (primary-key class))))
       (format out " FROM ~A" (s-sql:to-sql-name (dao-table-name class)))

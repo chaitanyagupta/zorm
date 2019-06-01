@@ -90,7 +90,7 @@ CREATE TABLE employees (
    (organization :references organization)
    (name :column t :initarg :name :accessor employee-name)
    (full-time-p :column t :initarg :full-time-p :type boolean :accessor employee-full-time-p)
-   (address :column t :initarg :address :accessor employee-address :selectp nil))
+   (address :column t :initarg :address :accessor employee-address :lazy t))
   (:metaclass dao-class)
   (:table-name employees)
   (:primary-key employee-id))
