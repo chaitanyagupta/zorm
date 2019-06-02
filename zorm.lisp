@@ -60,13 +60,20 @@
         direct-superclasses)))
 
 (defmethod compute-class-precedence-list ((class dao-class))
-  (let ((precedence-list (call-next-method))
+  (let ((cpl (call-next-method))
+        (standard-object-class (find-class 'standard-object))
         (dao-root-class (find-class 'dao nil)))
-    (if (and dao-root-class
-             (not (eql class dao-root-class))
-             (not (find dao-root-class precedence-list)))
-        (error "DAO not in the class precedent list for: ~A" class)
-        precedence-list)))
+    (cond ((not (find standard-object-class cpl))
+           (error "Could not find STANDARD-OBJECT in the precedence list for ~A" class))
+          ((null dao-root-class) ; we are finalizing DAO at this point, which is
+                                 ; why it does not exist
+           cpl)
+          ((not (find dao-root-class cpl))
+           (let ((position (position standard-object-class cpl)))
+             (append (subseq cpl 0 position)
+                     (list dao-root-class)
+                     (subseq cpl position))))
+          (t cpl))))
 
 (defclass dao-column-definition ()
   ((sql-name :initarg :sql-name
@@ -231,18 +238,7 @@ find-primary-key-info function."))
             (if (symbolp (car table-name)) (car table-name) (intern (car table-name))))
       (slot-makunbound class 'table-name)))
 
-(defun dao-superclasses (class)
-  "Build a list of superclasses of a given class that are DAO
-  classes."
-  (let ((found ()))
-    (labels ((explore (class)
-               (when (typep class 'dao-class)
-                 (pushnew class found))
-               (mapc #'explore (class-direct-superclasses class))))
-      (explore class)
-      found)))
-
-(defvar *class-finalize-lock* (bt:make-lock))
+(defvar *class-finalize-lock* (bt:make-recursive-lock "class finalization lock"))
 
 (defmethod finalize-inheritance ((class dao-class))
   (flet
@@ -252,7 +248,9 @@ find-primary-key-info function."))
          ;; set the primary key
          (setf (slot-value class 'effective-primary-key)
                (or (direct-primary-key class)
-                   (some #'primary-key (rest (dao-superclasses class)))))
+                   (some #'primary-key (rest (remove-if-not (lambda (class)
+                                                              (typep class 'dao-class))
+                                                            (class-precedence-list class))))))
          (unless (every (lambda (x) (member x (dao-class-column-slot-names class))) (primary-key class))
            (error "Class ~A has a key that is not also a slot." (class-name class)))
 

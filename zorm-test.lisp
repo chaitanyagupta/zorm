@@ -27,12 +27,6 @@
 
 (zorm::ensure-class-is-finalized 'dc2)
 
-(def-test test-superclasses (:suite dao-class-tests)
-  (is (equal (list (find-class 'dao))
-             (class-direct-superclasses (find-class 'dc1))))
-  (is (equal (list (find-class 'c1) (find-class 'dc1))
-             (class-direct-superclasses (find-class 'dc2)))))
-
 (def-test test-primary-key (:suite dao-class-tests)
   (is (equal (primary-key (find-class 'dc1)) (list 'id)))
   (is (equal (primary-key (find-class 'dc2)) (list 'id))))
