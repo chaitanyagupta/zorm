@@ -553,7 +553,7 @@ this after loading zorm):
 The test system requires PostgreSQL too, and, by default, assumes the following
 Postgres credentials are in place:
 
-* username: `zorm_test` (must have the `CREATEDB` role)
+* username: `zorm_test` (must have the `CREATEDB` permission)
 * password: `zorm_test`
 * host: `localhost`
 
